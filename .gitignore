@@ -1,0 +1,12 @@
+# Gradle
+.gradle/
+build/
+*/build/
+bin/
+
+# IDE & OS
+.idea/
+*.iml
+.vscode/
+*.log
+.DS_Store

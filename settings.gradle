@@ -1,0 +1,5 @@
+rootProject.name = 'server'
+
+include 'common-lib'
+include 'order-service'
+include 'payment-service'
