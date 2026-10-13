@@ -47,6 +47,24 @@ public class OrderController {
                 .orElse(ResponseEntity.notFound().build());
     }
 
+    @PutMapping("/{id}/cancel")
+    @PostMapping("/{id}/cancel")
+    @Operation(summary = "Admin cancels an order", description = "Updates order status to CANCELLED")
+    public ResponseEntity<OrderResponse> cancelOrder(@PathVariable String id) {
+        return orderService.cancelOrder(id)
+                .map(ResponseEntity::ok)
+                .orElse(ResponseEntity.notFound().build());
+    }
+
+    @PutMapping("/{id}/ship")
+    @PostMapping("/{id}/ship")
+    @Operation(summary = "Admin ships / dispatches an order", description = "Updates order status to SHIPPED")
+    public ResponseEntity<OrderResponse> shipOrder(@PathVariable String id) {
+        return orderService.shipOrder(id)
+                .map(ResponseEntity::ok)
+                .orElse(ResponseEntity.notFound().build());
+    }
+
     @GetMapping("/metrics")
     @Operation(summary = "Get order metrics and health summary")
     public ResponseEntity<Map<String, Object>> getMetrics() {

@@ -119,6 +119,26 @@ public class OrderService {
         return true;
     }
 
+    public Optional<OrderResponse> cancelOrder(String id) {
+        return orderRepository.findById(id).map(order -> {
+            order.setStatus(OrderStatus.CANCELLED);
+            order.setNote("Đơn hàng đã bị hủy bởi quản trị viên (Admin)");
+            orderRepository.save(order);
+            log.info("[OrderService] Order {} cancelled by Admin", id);
+            return toResponse(order);
+        });
+    }
+
+    public Optional<OrderResponse> shipOrder(String id) {
+        return orderRepository.findById(id).map(order -> {
+            order.setStatus(OrderStatus.SHIPPED);
+            order.setNote("Đơn hàng đã được xuất kho và bàn giao vận chuyển");
+            orderRepository.save(order);
+            log.info("[OrderService] Order {} dispatched/shipped by Admin", id);
+            return toResponse(order);
+        });
+    }
+
     public Map<String, Object> getMetrics() {
         List<OrderEntity> all = orderRepository.findAll();
         long total = all.size();
@@ -126,6 +146,8 @@ public class OrderService {
         long pending = all.stream().filter(o -> o.getStatus() == OrderStatus.PENDING).count();
         long failed = all.stream().filter(o -> o.getStatus() == OrderStatus.FAILED).count();
         long dlt = all.stream().filter(o -> o.getStatus() == OrderStatus.DLT_ROUTED).count();
+        long shipped = all.stream().filter(o -> o.getStatus() == OrderStatus.SHIPPED).count();
+        long cancelled = all.stream().filter(o -> o.getStatus() == OrderStatus.CANCELLED).count();
 
         Map<String, Object> metrics = new HashMap<>();
         metrics.put("totalOrders", total);
@@ -133,7 +155,9 @@ public class OrderService {
         metrics.put("pendingOrders", pending);
         metrics.put("failedOrders", failed);
         metrics.put("dltRoutedOrders", dlt);
-        metrics.put("successRate", total > 0 ? (double) confirmed / total * 100 : 0.0);
+        metrics.put("shippedOrders", shipped);
+        metrics.put("cancelledOrders", cancelled);
+        metrics.put("successRate", total > 0 ? (double) (confirmed + shipped) / total * 100 : 0.0);
         return metrics;
     }
 
