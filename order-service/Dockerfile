@@ -1,12 +1,20 @@
-# Stage 1: Build
+# Stage 1: Build Jar
 FROM gradle:8.14-jdk21-alpine AS builder
 WORKDIR /app
 COPY . .
 RUN chmod +x gradlew && ./gradlew :order-service:bootJar -x test --no-daemon
 
-# Stage 2: Minimal Runtime
+# Stage 2: Runtime Non-Root (Temurin 21 JRE)
 FROM eclipse-temurin:21-jre-alpine
+
+# Bắt buộc cho đề thi: Chạy dưới quyền user non-root
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+
 WORKDIR /app
-COPY --from=builder /app/order-service/build/libs/*.jar app.jar
+COPY --from=builder /app/order-service/build/libs/*[!plain].jar app.jar
+RUN chown -R appuser:appgroup /app
+
+USER appuser
+
 EXPOSE 8081
 ENTRYPOINT ["java", "-XX:+UseG1GC", "-jar", "app.jar"]
