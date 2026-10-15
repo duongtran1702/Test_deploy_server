@@ -1,0 +1,154 @@
+name: Production Microservices CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  # ==========================================================
+  # JOB 1: CI BUILD & TEST (Compile & Test BootJars)
+  # ==========================================================
+  ci-build:
+    name: Build & Package Jars
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+          cache: 'gradle'
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Build executable bootJars with Gradle
+        run: ./gradlew bootJar -x test --no-daemon
+
+      - name: Upload Order Service Jar
+        uses: actions/upload-artifact@v4
+        with:
+          name: order-service-jar
+          path: order-service/build/libs/*[!plain].jar
+          retention-days: 1
+
+      - name: Upload Payment Service Jar
+        uses: actions/upload-artifact@v4
+        with:
+          name: payment-service-jar
+          path: payment-service/build/libs/*[!plain].jar
+          retention-days: 1
+
+  # ==========================================================
+  # JOB 2: DOCKER BUILD & PUSH TO GHCR
+  # ==========================================================
+  package-docker:
+    name: Build & Push Docker Images
+    needs: ci-build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Download Order Service Jar
+        uses: actions/download-artifact@v4
+        with:
+          name: order-service-jar
+          path: order-service/build/libs
+
+      - name: Download Payment Service Jar
+        uses: actions/download-artifact@v4
+        with:
+          name: payment-service-jar
+          path: payment-service/build/libs
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and Push Order Service Image
+        run: |
+          REPO_LC=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+          docker build -t ghcr.io/${REPO_LC}/order-service:${{ github.sha }} -t ghcr.io/${REPO_LC}/order-service:latest -f order-service/Dockerfile .
+          docker push ghcr.io/${REPO_LC}/order-service:${{ github.sha }}
+          docker push ghcr.io/${REPO_LC}/order-service:latest
+
+      - name: Build and Push Payment Service Image
+        run: |
+          REPO_LC=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+          docker build -t ghcr.io/${REPO_LC}/payment-service:${{ github.sha }} -t ghcr.io/${REPO_LC}/payment-service:latest -f payment-service/Dockerfile .
+          docker push ghcr.io/${REPO_LC}/payment-service:${{ github.sha }}
+          docker push ghcr.io/${REPO_LC}/payment-service:latest
+
+  # ==========================================================
+  # JOB 3: CD DEPLOY TO VPS & SMOKE TEST
+  # ==========================================================
+  cd-deploy:
+    name: Deploy to VPS & Smoke Test
+    needs: package-docker
+    runs-on: ubuntu-latest
+    steps:
+      - name: SSH into VPS and Deploy Containers
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            set -e
+            mkdir -p ${{ vars.DEPLOY_PATH }}
+            cd ${{ vars.DEPLOY_PATH }}
+
+            # Cập nhật mã nguồn / docker-compose từ Git repo
+            if [ ! -d ".git" ]; then
+              git clone https://github.com/${{ github.repository }}.git .
+            else
+              git fetch --all
+              git reset --hard origin/main
+            fi
+
+            REPO_LC=$(echo "${{ github.repository }}" | tr '[:upper:]' '[:lower:]')
+
+            # Cập nhật file .env với commit sha mới nhất
+            cat <<EOF > .env
+            DB_ROOT_PASSWORD=root_secret_123
+            DB_NAME=order_db
+            DB_USER=order_user
+            DB_PASSWORD=order_pass_123
+            ORDER_IMAGE=ghcr.io/${REPO_LC}/order-service:${{ github.sha }}
+            PAYMENT_IMAGE=ghcr.io/${REPO_LC}/payment-service:${{ github.sha }}
+            EOF
+
+            # Đăng nhập GHCR và kéo image mới về VPS
+            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+            docker compose pull order-service payment-service
+            docker compose up -d --remove-orphans
+
+            # Dọn dẹp images cũ
+            docker image prune -f
+            docker compose ps
+
+      - name: Smoke Test Order Service
+        run: |
+          echo "Smoke testing Order Service at ${{ vars.ORDER_APP_URL }}..."
+          code=$(curl -s -o /dev/null -w '%{http_code}' --retry 10 --retry-delay 6 --retry-all-errors --max-time 10 "${{ vars.ORDER_APP_URL }}" || true)
+          echo "Order Service HTTP Status: $code"
+          [ "$code" -eq 200 ]
+
+      - name: Smoke Test Payment Service
+        run: |
+          echo "Smoke testing Payment Service at ${{ vars.PAYMENT_APP_URL }}..."
+          code=$(curl -s -o /dev/null -w '%{http_code}' --retry 10 --retry-delay 6 --retry-all-errors --max-time 10 "${{ vars.PAYMENT_APP_URL }}" || true)
+          echo "Payment Service HTTP Status: $code"
+          [ "$code" -eq 200 ]

@@ -23,4 +23,11 @@ dependencies {
 
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
     testImplementation 'org.springframework.kafka:spring-kafka-test'
+
+    // MySQL Driver (Sẵn sàng nếu đề bài yêu cầu kết nối Database)
+    runtimeOnly 'com.mysql:mysql-connector-j'
+}
+
+jar {
+    enabled = false
 }
